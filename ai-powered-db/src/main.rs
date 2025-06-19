@@ -1,48 +1,61 @@
-use byteorder::{ByteOrder, LittleEndian};
+use std::io::BufReader;
 
+// use byteorder::{ByteOrder, LittleEndian};
+use async_compression::tokio::write::ZstdEncoder;
+use async_compression::zstd;
 use tokio::fs::OpenOptions;
-use tokio::io::{self, AsyncWriteExt};
+use tokio::io::{AsyncWriteExt};
+use crc32fast::Hasher;
 
 #[tokio::main]
 async fn main(){
     // #TODO Durability https://calvin.loncaric.us/articles/CreateFile.html
+    let dir = OpenOptions::new().read(true).open("./").await.unwrap();
+
      let log_insert = OpenOptions::new()
         .read(true)
         .create(true)
         .append(true)
-        .open("foo")
+        .open("./foo")
         .await.unwrap();
+
+    dir.sync_all().await.unwrap();        
 
     let msg = Message{
         key: "12312".to_string(),
         value: "value1231".to_string()
     };
-
-    publish(vec![msg], log_insert).await;
+// #TODO lidar com erro
+    publish(vec![msg], log_insert).await.unwrap(); 
 }
 
 #[derive(Debug)]
 struct Message {
-        // timestamp: i64,
         key : String,
         value: String
-        // process_data: i64
 }
 
-async fn publish(mut msg: Vec<Message>, mut log: tokio::fs::File)-> Result<(), std::io::Error>{
-    let mut buffer: Vec<u8> = Vec::new();
-    for x in msg {
-        std::io::Write::write_all(&mut buffer, &[x.key.len() as u8])?;
-        std::io::Write::write_all(&mut buffer, x.key.as_bytes())?;
-        std::io::Write::write_all(&mut buffer, &(x.value.len() as u16).to_le_bytes())?;
-        std::io::Write::write_all(&mut buffer, x.value.as_bytes())?;
-    };
-    let checksum = crc32fast::hash(&buffer);
-    std::io::Write::write_all(&mut buffer, &checksum.to_le_bytes())?;
-    
+async fn publish(msg: Vec<Message>, mut log: tokio::fs::File)-> Result<(), std::io::Error>{
+    let buffer = Vec::new();
+    let mut encd = ZstdEncoder::new(buffer);
 
-    log.write_all(&buffer).await.unwrap();
-    return Ok(());
+    for x in msg {
+        encd.write_all(&[x.key.len() as u8]).await?;
+        encd.write_all(x.key.as_bytes()).await?;
+        encd.write_all(&(x.value.len() as u16).to_le_bytes()).await?;
+        encd.write_all( x.value.as_bytes()).await?;
+    };
+    
+    encd.flush().await?;
+    let compressed_buffer = encd.into_inner();
+    let checksum = crc32fast::hash(&compressed_buffer);
+    log.write_all(&checksum.to_le_bytes()).await?;
+    log.write_all(&(compressed_buffer.len() as u16).to_le_bytes()).await?;
+    log.write_all(&compressed_buffer).await?;    
+
+    log.sync_all().await?;
+
+    Ok(())
 }
     // #TODO Durability
 
