@@ -1,11 +1,7 @@
-use std::io::BufReader;
-
 // use byteorder::{ByteOrder, LittleEndian};
 use async_compression::tokio::write::ZstdEncoder;
-use async_compression::zstd;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWriteExt};
-use crc32fast::Hasher;
 
 #[tokio::main]
 async fn main(){
